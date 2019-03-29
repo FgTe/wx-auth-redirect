@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+    <body>
+        <script>
+            window.allowedDomain = [];
+        </script>
+        <script>
+            (function (W, D) {
+                function Url (url) {
+                    try {
+                        var matched = url.match(/^([^:]+:)\/\/(?:([^:@]+)(?::([^@]+))?@)?([^:/;?#]+\.[^:\/;?#]+)(?::(\d+))?(\/[^;?#]+)?(;[^?#]+)?(\?[^#]+)?(#.+)?$/);
+                        this.url = url;
+                        this.scheme = matched[1] || '';
+                        this.user = matched[2] || '';
+                        this.password = matched[3] || '';
+                        this.host = matched[4] || '';
+                        this.port = matched[5] || '';
+                        this.path = matched[6] || '';
+                        this.params = matched[7] || '';
+                        this.query = matched[8] || '';
+                        this.frag = matched[9] || '';
+                    } catch (err) {
+                        throw new Error('invalid url');
+                    }
+                }
+                Url.prototype.getURL = function () {
+                    return this.scheme + '//' + this.user + ( this.password ? ':' : '' ) + this.password + ( this.user ? '@' : '' ) + this.host + ( this.port ? ':' : '' ) + this.port + this.path + this.params + this.query + this.frag
+                }
+                function Query (str) {
+                    this.queries = {};
+                    var matched = str.match(/[^?&=]+=?[^?&]*/g)
+                    if ( matched ) {
+                        var re = /([^=]+)(?:=(.+))/;
+                        for ( var i = 0; i < matched.length; i++ ) {
+                            var item = matched[i].match(re);
+                            if ( item ) {
+                                this.queries[item[1]] = item[2] ? item[2] : true;
+                            }
+                        }
+                    }
+                }
+                var cookieUtil = {
+                    matchPattern: '=([^;]*)(?:$|;)',
+                    get (name) {
+                        let matched = D.cookie.match(new RegExp(name + this.matchPattern));
+                        if ( matched ) {
+                            return decodeURIComponent(matched[1]);
+                        } else {
+                            return null;
+                        }
+                    },
+                    set (name, value, option) {
+                        let cookie = name + '=' + encodeURIComponent(value);
+                        if ( option ) {
+                            if ( option.expires instanceof Date ) 
+                                cookie += '; expires=' + option.expires.toGMTString();
+                            if ( option.path ) 
+                                cookie += '; path=' + option.path;
+                            if ( option.domain )
+                                cookie += '; domain=' + option.domain;
+                            if ( option.maxAge )
+                                cookie += '; Max-Age=' + option.maxAge
+                            if ( option.secure )
+                                cookie += '; secure';
+                        }
+                        D.cookie = cookie;
+                    },
+                    unset (name, option) {
+                        this.set(name, '', Object.assign({}, option, { expires: new Date(0) }));
+                    }
+                }
+                function verifyDomain (list, domain) {
+                    if ( !domain ) return false;
+                    for ( var i = 0; i < list.length; i++ ) {
+                        if ( domain.length - list.length >= 0 && domain.indexOf(list[0]) === domain.length - list[0].length ) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                function goToWXAuthURL (redireactURI, appId, scope, referred) {
+                    cookieUtil.set('redirect_uri', referred);
+                    W.location.href = W.location.protocol + '//open.weixin.qq.com/connect/oauth2/authorize?appid=' + appId + '&redirect_uri=' + encodeURIComponent(redireactURI) + '&response_type=code&scope=' + ( scope ? scope : 'snsapi_userinfo' + '#wechat_redirect');
+                }
+                function getWXCode (redirect) {
+                    var query = new Query(W.location.search)
+                    var code = query.queries.code;
+                    var scope = query.queries.scope;
+                    var appId = query.queries.appid;
+                    var back = W.location.origin + W.location.pathname;
+                    if ( code ) {
+                        redirect.query += ( redirect.query && redirect.query.length > 3 ? '&' : '?' ) + 'code=' + code;
+                        cookieUtil.unset('redirect_uri');
+                        W.location.href = redirect.getURL();
+                    } else {
+                        if ( appId ) {
+                            goToWXAuthURL(back, appId, scope, redirect.getURL());
+                        } else {
+                            var xhr = new XMLHttpRequest();
+                            xhr.onreadystatechange = function ( ) {
+                                if( xhr.readyState === 4 && ( xhr.status == 200 || xhr.status == 304 ) ) {
+                                    var resp = xhr.responseText.match(/"response"\s*:\s*"(\w+)"/);
+                                    if ( resp ) {
+                                        appId = resp[1];
+                                        goToWXAuthURL(back, appId, scope, redirect.getURL());
+                                    }
+                                }
+                            };
+                            xhr.open('GET', '/server/extra/c/weixin/getAppId');
+                            xhr.send();
+                        }
+                    }
+                }
+                var url = new Url(W.location.href);
+                var query = new Query(url.query || '');
+                var redirect = decodeURIComponent(query.queries.redirect_uri || cookieUtil.get('redirect_uri'));
+                if ( redirect ) {
+                    redirect = new Url(W.allowedDomain);
+                    if ( verifyDomain(allowed, redirect.host) ) {
+                        getWXCode(redirect);
+                    } else {
+                        W.location.href = redirect.url;
+                    }
+                } else {
+                    W.history.back();
+                }
+            })(window, document)
+        </script>
+    </body>
+</html>
